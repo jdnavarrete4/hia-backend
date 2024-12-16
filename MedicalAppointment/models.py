@@ -52,7 +52,7 @@ class Medico(models.Model):
     contrasena = models.CharField(max_length=100)
     rol = models.CharField(max_length=50, default='medico')
     descripcion = models.TextField(blank=True, null=True)
-    foto = models.ImageField(upload_to='fotos_medicos/', blank=True, null=True)
+    foto = models.URLField(max_length=255, blank=True, null=True)
 
     def __str__(self):
         return f"{self.nombre} {self.apellido} ({self.especialidad.nombre})"
