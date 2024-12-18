@@ -4,37 +4,14 @@ from django.contrib.auth.models import User
 
 
 class Paciente(models.Model):
-    
-    ROL_CHOICES = [
-        ('paciente', 'Paciente'),
-        ('medico', 'Médico'),
-        ('administrador', 'Administrador'),
-    ]
-      
-    rol = models.CharField(max_length=20, choices=ROL_CHOICES, default='Paciente')
-    user = models.OneToOneField(User, on_delete=models.CASCADE)  # Relación con el modelo User
-    nombre = models.CharField(max_length=100)
-    apellido = models.CharField(max_length=100)
-    correo_electronico = models.EmailField(unique=True)
+    user = models.OneToOneField(User, on_delete=models.CASCADE)  # Relación con User
     telefono = models.CharField(max_length=15)
     numero_cedula = models.CharField(max_length=20, unique=True)
     fecha_nacimiento = models.DateField()
-    contrasena = models.CharField(max_length=100)
     direccion = models.CharField(max_length=255, blank=True, null=True)
-    
-
-    def save(self, *args, **kwargs):
-        if not self.pk:  
-            self.contrasena = make_password(self.contrasena)
-        else:
-            # Verifica si la contraseña ha cambiado
-            original = Paciente.objects.get(pk=self.pk)
-            if original.contrasena != self.contrasena:
-                self.contrasena = make_password(self.contrasena)
-        super().save(*args, **kwargs)
 
     def __str__(self):
-        return f'{self.nombre} {self.apellido}'
+        return f'{self.user.first_name} {self.user.last_name}'
     
 class Especialidad(models.Model):
     nombre = models.CharField(max_length=100, unique=True)
@@ -44,18 +21,15 @@ class Especialidad(models.Model):
 
 
 class Medico(models.Model):
-    nombre = models.CharField(max_length=100)
-    apellido = models.CharField(max_length=100)
-    especialidad = models.ForeignKey(Especialidad, on_delete=models.CASCADE, related_name='medicos')
-    correo_electronico = models.EmailField(unique=True)
+    user = models.OneToOneField(User, on_delete=models.CASCADE, default=99)  # Relación con User
+    especialidad = models.ForeignKey('Especialidad', on_delete=models.CASCADE, related_name='medicos')
     telefono = models.CharField(max_length=20)
-    contrasena = models.CharField(max_length=100)
-    rol = models.CharField(max_length=50, default='medico')
     descripcion = models.TextField(blank=True, null=True)
     foto = models.URLField(max_length=255, blank=True, null=True)
 
     def __str__(self):
-        return f"{self.nombre} {self.apellido} ({self.especialidad.nombre})"
+        return f"{self.user.first_name} {self.user.last_name} ({self.especialidad.nombre})"
+
     
 
 class Administrador(models.Model):

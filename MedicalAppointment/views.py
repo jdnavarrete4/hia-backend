@@ -1,4 +1,5 @@
 # views.py
+from django.contrib.auth.models import Group
 from django.contrib.auth.hashers import check_password
 from django.shortcuts import get_object_or_404
 from rest_framework import status, generics
@@ -29,23 +30,28 @@ def registrar_paciente(request):
     if request.method == 'POST':
         data = request.data
 
-        # Crear el usuario en el modelo User
         try:
+            # Crear el usuario en el modelo User
             user = User.objects.create_user(
-                username=data['correo_electronico'],
+                username=data['correo_electronico'],  # El correo electrónico como nombre de usuario
                 email=data['correo_electronico'],
                 password=data['contrasena']
             )
+            user.first_name = data['nombre']
+            user.last_name = data['apellido']
+            user.save()
+
+            # Asignar el grupo "paciente" al usuario
+            grupo_paciente = Group.objects.get(name='paciente')
+            user.groups.add(grupo_paciente)
 
             # Crear el paciente asociado al usuario
             paciente = Paciente.objects.create(
                 user=user,
-                nombre=data['nombre'],
-                apellido=data['apellido'],
                 telefono=data['telefono'],
                 numero_cedula=data['numero_cedula'],
-                correo_electronico=data['correo_electronico'], 
-                fecha_nacimiento=data['fecha_nacimiento']
+                fecha_nacimiento=data['fecha_nacimiento'],
+                direccion=data.get('direccion', "")  # Dirección opcional
             )
 
             # Serializar el paciente para la respuesta
@@ -66,52 +72,63 @@ def login(request):
 
     if user is not None:
         try:
-            # Determinar el rol basado en el modelo relacionado
-            if hasattr(user, 'paciente'):
+            # Determinar el rol del usuario basado en los grupos
+            if user.groups.filter(name='paciente').exists():
                 rol = 'paciente'
-            elif hasattr(user, 'medico'):
+            elif user.groups.filter(name='medico').exists():
                 rol = 'medico'
-            elif hasattr(user, 'administrador'):
+            elif user.groups.filter(name='administrador').exists():
                 rol = 'administrador'
             else:
                 rol = 'desconocido'
 
             # Generar o recuperar el token
             token, _ = Token.objects.get_or_create(user=user)
+
+            # Respuesta con token y rol del usuario
             return Response({
                 'mensaje': 'Inicio de sesión exitoso',
                 'rol': rol,
                 'token': token.key
             }, status=status.HTTP_200_OK)
+
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     return Response({'mensaje': 'Credenciales inválidas'}, status=status.HTTP_401_UNAUTHORIZED)
 
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_patient_data(request):
     try:
-        paciente = Paciente.objects.get(user=request.user)
+        # Obtener el modelo Paciente relacionado con el usuario autenticado
+        paciente = request.user.paciente
 
-        # Calcular la edad
+        # Calcular la edad del paciente
         today = date.today()
         birth_date = paciente.fecha_nacimiento
         edad = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
 
+        # Determinar el rol del usuario desde los grupos
+        if request.user.groups.filter(name='paciente').exists():
+            rol = 'paciente'
+        else:
+            rol = 'desconocido'
+
+        # Preparar los datos de respuesta
         data = {
-            'id': paciente.id,  # Agrega el ID del paciente aquí
-            'nombre': paciente.nombre,
-            'apellido': paciente.apellido,
+            'id': paciente.id,
+            'nombre': request.user.first_name,
+            'apellido': request.user.last_name,
             'numero_cedula': paciente.numero_cedula,
-            'correo_electronico': paciente.correo_electronico,
+            'correo_electronico': request.user.email,
             'telefono': paciente.telefono,
             'edad': edad,
-            'rol': paciente.rol.capitalize(),
+            'rol': rol.capitalize()
         }
-        return Response(data)
-    except Paciente.DoesNotExist:
+        return Response(data, status=200)
+
+    except AttributeError:
         return Response({'error': 'Paciente no encontrado'}, status=404)
     
 @api_view(['GET'])
@@ -140,20 +157,33 @@ def obtener_especialidades(request):
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def listar_medicos_por_especialidad(request, especialidad):
-    medicos = Medico.objects.filter(especialidad=especialidad)
-    data = [
-        {
-            'id': medico.id,
-            'nombre': medico.nombre,
-            'apellido': medico.apellido,
-            'correo': medico.correo_electronico,
-            'telefono': medico.telefono,
-            'descripcion': medico.descripcion,
-            'foto': medico.foto.url if medico.foto else None
-        }
-        for medico in medicos
-    ]
-    return Response(data)
+    try:
+        # Verificar que la especialidad existe
+        especialidad_obj = Especialidad.objects.get(id=especialidad)
+
+        # Filtrar médicos por la especialidad
+        medicos = Medico.objects.filter(especialidad=especialidad_obj)
+
+        # Preparar datos de respuesta
+        data = [
+            {
+                'id': medico.id,
+                'nombre': medico.user.first_name,
+                'apellido': medico.user.last_name,
+                'correo': medico.user.email,
+                'telefono': medico.telefono,
+                'descripcion': medico.descripcion,
+                'foto': medico.foto if medico.foto else None
+            }
+            for medico in medicos
+        ]
+
+        return Response(data, status=200)
+
+    except Especialidad.DoesNotExist:
+        return Response({'error': 'Especialidad no encontrada'}, status=404)
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
 
 @api_view(['GET'])
 def horarios_disponibles(request, especialidad_id):
