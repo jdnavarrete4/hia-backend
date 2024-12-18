@@ -196,12 +196,15 @@ for medico_data in medicos:
         user, created = User.objects.get_or_create(
             username=medico_data['correo_electronico'],
             defaults={
-                'first_name': fix_text(medico_data['nombre']),
-                'last_name': fix_text(medico_data['apellido']),
                 'email': medico_data['correo_electronico'],
                 'password': make_password(medico_data['contrasena']),
             }
         )
+
+        # Asegurarse de asignar nombre y apellido
+        user.first_name = medico_data['nombre']
+        user.last_name = medico_data['apellido']
+        user.save()
 
         # Asignar el grupo 'medico' al usuario
         grupo_medico, _ = Group.objects.get_or_create(name='medico')

@@ -226,56 +226,52 @@ class CustomPagination(PageNumberPagination):
 @api_view(['GET'])
 def fechas_disponibles_por_especialidad(request, especialidad_id):
     try:
-        # Obtener la especialidad
         especialidad = Especialidad.objects.get(id=especialidad_id)
-        
-        # Obtener los horarios de la especialidad
-        horarios = Horario.objects.filter(especialidad=especialidad)
-        dias_semana = list(set(horario.get_dia_semana_display() for horario in horarios))  # Días únicos como texto
+        horarios = Horario.objects.filter(especialidad_id=especialidad_id)
 
-        # Mapeo de días de la semana en inglés a español
-        dias_traduccion = {
-            'Monday': 'Lunes',
-            'Tuesday': 'Martes',
-            'Wednesday': 'Miércoles',
-            'Thursday': 'Jueves',
-            'Friday': 'Viernes',
-            'Saturday': 'Sábado',
-            'Sunday': 'Domingo'
-        }
-
-        # Fecha de inicio y final (un año a partir de hoy)
+        fechas_disponibles = []
         hoy = datetime.today().date()
         fecha_final = hoy + timedelta(days=365)
 
-        # Generar fechas disponibles
-        fechas_disponibles = []
         fecha_actual = hoy
-
         while fecha_actual <= fecha_final:
-            # Convertir el día de la semana actual a texto en español usando el diccionario
-            dia_actual_texto = dias_traduccion.get(fecha_actual.strftime('%A'), '')
-            print(f"Revisando fecha: {fecha_actual} ({dia_actual_texto})")
-            if dia_actual_texto in dias_semana:  # Comparar con los días únicos del horario
-                print(f"Fecha válida encontrada: {fecha_actual}")
-                for horario in horarios.filter(dia_semana__iexact=dia_actual_texto):  # Filtrar horarios del día
-                    fechas_disponibles.append({
-                        "fecha": fecha_actual.strftime('%d-%B-%Y'),
-                        "dia_semana": horario.get_dia_semana_display(),
-                        "hora_inicio": horario.hora_inicio.strftime('%H:%M'),
-                        "hora_fin": horario.hora_fin.strftime('%H:%M'),
-                        "medico": horario.medico.nombre if horario.medico else "Sin asignar",
-                        "medico_id": horario.medico.id if horario.medico else None,  # Agregar el ID del médico
-                    })
-            fecha_actual += timedelta(days=1)  # Incrementar un día
-        
+            
+            dias_traduccion = {
+            'monday': 'Lunes',
+            'tuesday': 'Martes',
+            'wednesday': 'Miércoles',
+            'thursday': 'Jueves',
+            'friday': 'Viernes',
+            'saturday': 'Sábado',
+            'sunday': 'Domingo',
+                            }
+            dia_semana = dias_traduccion.get(fecha_actual.strftime('%A').lower(), '')
+
+
+            for horario in horarios.filter(dia_semana=dia_semana):
+                medico_nombre = (
+                    f"{horario.medico.user.first_name} {horario.medico.user.last_name}"
+                    if horario.medico else "Sin asignar"
+                )
+
+                fechas_disponibles.append({
+                    "fecha": fecha_actual.strftime('%d-%B-%Y'),
+                    "dia_semana": horario.get_dia_semana_display(),
+                    "hora_inicio": horario.hora_inicio.strftime('%H:%M'),
+                    "hora_fin": horario.hora_fin.strftime('%H:%M'),
+                    "medico": medico_nombre,
+                    "medico_id": horario.medico.id if horario.medico else None,
+                })
+
+            fecha_actual += timedelta(days=1)
+
         paginator = CustomPagination()
         paginated_fechas = paginator.paginate_queryset(fechas_disponibles, request)
         return paginator.get_paginated_response(paginated_fechas)
-    
+
     except Especialidad.DoesNotExist:
-        print("Especialidad no encontrada.")
         return JsonResponse({"error": "Especialidad no encontrada."}, status=404)
+
 
 
 
