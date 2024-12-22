@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.models import User
+from django.utils.timezone import now
 
 
 class Paciente(models.Model):
@@ -52,14 +53,37 @@ class Administrador(models.Model):
     def __str__(self):
         return f"{self.nombre} {self.apellido}"
 
+# models.py
+
 class Cita(models.Model):
-    usuario = models.ForeignKey(User, on_delete=models.CASCADE)
+    # Antes:
+    # usuario = models.ForeignKey(User, ...)
+    # Ahora:
+    paciente = models.ForeignKey(Paciente, on_delete=models.CASCADE, related_name="citas")
+
     especialidad = models.ForeignKey(Especialidad, on_delete=models.CASCADE)
-    medico = models.ForeignKey(Medico, on_delete=models.CASCADE)
+    medico = models.ForeignKey(Medico, on_delete=models.CASCADE, related_name="citas")
     fecha = models.DateField()
-    hora = models.TimeField(default="09:00")  # Campo obligatorio nuevamente
-    estado = models.CharField(max_length=50, default="Reservada")
+    hora = models.TimeField(default="09:00")
+    estado = models.CharField(
+        max_length=50,
+        choices=[
+            ('reservada', 'Reservada'),
+            ('cancelada', 'Cancelada'),
+            ('completada', 'Completada'),
+        ],
+        default='reservada'
+    )
     direccion = models.CharField(max_length=255)
+    descripcion = models.TextField(blank=True, null=True)
+    motivo = models.CharField(max_length=255, blank=True, null=True)
+
+    class Meta:
+        ordering = ['fecha', 'hora']
+
+    def __str__(self):
+        return f"Cita con {self.medico.user.first_name} para {self.paciente.user.first_name}"
+
 
 
 class HistorialMedico(models.Model):
@@ -114,3 +138,63 @@ class Horario(models.Model):
     def __str__(self):
         medico_info = f" - {self.medico.nombre}" if self.medico else ""
         return f"{self.especialidad.nombre} - {self.dia_semana} ({self.hora_inicio} - {self.hora_fin}){medico_info}"
+    
+class Diagnostico(models.Model):
+    descripcion = models.TextField()
+    es_covid = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    medico = models.ForeignKey('auth.User', on_delete=models.CASCADE)
+    paciente = models.ForeignKey('Paciente', on_delete=models.CASCADE)
+
+    def __str__(self):
+        return f"Diagnóstico de {self.paciente} por {self.medico}"
+
+
+class Receta(models.Model):
+    diagnostico = models.ForeignKey(
+        Diagnostico, 
+        on_delete=models.CASCADE, 
+        null=True,  # Permitir valores nulos
+        blank=True,  # Permitir valores vacíos en formularios
+        related_name="recetas"
+    )
+    nombre_medicamento = models.CharField(
+        max_length=255, 
+        null=True,  # Permitir valores nulos
+        blank=True,  # Permitir valores vacíos en formularios
+        default=""  # O establece un valor predeterminado
+    )
+    dosis = models.CharField(
+        max_length=255, 
+        null=True, 
+        blank=True, 
+        default="No especificada"  # Valor predeterminado para evitar errores
+    )
+    duracion = models.CharField(
+        max_length=255, 
+        null=True, 
+        blank=True, 
+        default="No especificada"
+    )
+    prescripcion = models.TextField(
+        null=True, 
+        blank=True, 
+        default=""  # O agrega una descripción predeterminada si es necesario
+    )
+    created_at = models.DateTimeField(default=now)
+
+class FichaMedica(models.Model):
+    cita = models.OneToOneField('Cita', on_delete=models.CASCADE, related_name='ficha_medica')
+    diagnostico = models.ForeignKey(Diagnostico, on_delete=models.CASCADE, related_name='fichas')
+    receta = models.ForeignKey('Receta', on_delete=models.CASCADE)  # Relación con Receta
+    tipo_enfermedad = models.CharField(max_length=255)
+    fecha_creacion = models.DateTimeField(default=now)
+
+    def __str__(self):
+        return f"Ficha Médica para Cita {self.cita.id}"
+    
+class Enfermedad(models.Model):
+    nombre = models.CharField(max_length=255)
+
+    def __str__(self):
+        return self.nombre
