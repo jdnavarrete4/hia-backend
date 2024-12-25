@@ -1,3 +1,4 @@
+from django import views
 from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import path, include
@@ -8,7 +9,9 @@ from . import api_views
 from .views import (
     citas_por_especialidad,
     crear_cita,
+    crear_diagnostico,
     crear_ficha_medica,
+    crear_receta,
     fechas_disponibles_por_especialidad,
     horarios_disponibles,
     listar_enfermedades,
@@ -45,7 +48,9 @@ urlpatterns = [
     path('api/crear-cita/', crear_cita, name='crear_cita'),
     path('api/medico/<int:medico_id>/citas/', obtener_citas_medico, name='obtener_citas_medico'),  
     path('api/enfermedades/', listar_enfermedades, name='listar_enfermedades'),
-    path('api/citas/<int:cita_id>/ficha/', crear_ficha_medica, name='crear_ficha_medica'),
+    path('api/fichas-medicas/', crear_ficha_medica, name='crear_ficha_medica'),
+    path('api/diagnosticos/<int:cita_id>/', crear_diagnostico, name='crear_diagnostico'),
+    path('api/recetas/', crear_receta, name='crear_receta'),
 
 
 ]

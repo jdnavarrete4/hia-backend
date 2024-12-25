@@ -70,7 +70,7 @@ class Cita(models.Model):
         choices=[
             ('reservada', 'Reservada'),
             ('cancelada', 'Cancelada'),
-            ('completada', 'Completada'),
+            ('finalizada', 'Finalizada'),
         ],
         default='reservada'
     )
@@ -143,51 +143,28 @@ class Diagnostico(models.Model):
     descripcion = models.TextField()
     es_covid = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
-    medico = models.ForeignKey('auth.User', on_delete=models.CASCADE)
+    medico = models.ForeignKey(User, on_delete=models.CASCADE)  # Relación con User
     paciente = models.ForeignKey('Paciente', on_delete=models.CASCADE)
+    enfermedad = models.ForeignKey('Enfermedad', on_delete=models.CASCADE, null=True, blank=True)  # Relación con Enfermedad
+
 
     def __str__(self):
         return f"Diagnóstico de {self.paciente} por {self.medico}"
 
 
 class Receta(models.Model):
-    diagnostico = models.ForeignKey(
-        Diagnostico, 
-        on_delete=models.CASCADE, 
-        null=True,  # Permitir valores nulos
-        blank=True,  # Permitir valores vacíos en formularios
-        related_name="recetas"
-    )
-    nombre_medicamento = models.CharField(
-        max_length=255, 
-        null=True,  # Permitir valores nulos
-        blank=True,  # Permitir valores vacíos en formularios
-        default=""  # O establece un valor predeterminado
-    )
-    dosis = models.CharField(
-        max_length=255, 
-        null=True, 
-        blank=True, 
-        default="No especificada"  # Valor predeterminado para evitar errores
-    )
-    duracion = models.CharField(
-        max_length=255, 
-        null=True, 
-        blank=True, 
-        default="No especificada"
-    )
-    prescripcion = models.TextField(
-        null=True, 
-        blank=True, 
-        default=""  # O agrega una descripción predeterminada si es necesario
-    )
-    created_at = models.DateTimeField(default=now)
+    diagnostico = models.ForeignKey(Diagnostico, on_delete=models.CASCADE, related_name="recetas")
+    nombre_medicamento = models.CharField(max_length=255, blank=True, null=True, default="")
+    dosis = models.CharField(max_length=255, blank=True, null=True, default="No especificada")
+    duracion = models.CharField(max_length=255, blank=True, null=True, default="No especificada")
+    prescripcion = models.TextField(blank=True, null=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    notas = models.TextField(blank=True, null=True)
 
 class FichaMedica(models.Model):
     cita = models.OneToOneField('Cita', on_delete=models.CASCADE, related_name='ficha_medica')
     diagnostico = models.ForeignKey(Diagnostico, on_delete=models.CASCADE, related_name='fichas')
     receta = models.ForeignKey('Receta', on_delete=models.CASCADE)  # Relación con Receta
-    tipo_enfermedad = models.CharField(max_length=255)
     fecha_creacion = models.DateTimeField(default=now)
 
     def __str__(self):

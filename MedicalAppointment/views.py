@@ -6,7 +6,7 @@ from rest_framework import status, generics
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from .models import Diagnostico, Enfermedad, Especialidad, Horario, Paciente, Medico,Administrador
-from .serializers import PacienteSerializer, MedicoSerializer
+from .serializers import PacienteSerializer, MedicoSerializer, RecetaSerializer
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.authtoken.models import Token
@@ -234,11 +234,21 @@ class CustomPagination(PageNumberPagination):
     page_size_query_param = 'page_size'
     max_page_size = 50
 
+from django.db.models import Q
+
+from django.db.models import Q
+
 @api_view(['GET'])
 def fechas_disponibles_por_especialidad(request, especialidad_id):
     try:
         especialidad = Especialidad.objects.get(id=especialidad_id)
         horarios = Horario.objects.filter(especialidad_id=especialidad_id)
+
+        # Obtener las citas con estado Reservada o Finalizada
+        citas_ocupadas = Cita.objects.filter(
+            especialidad=especialidad,
+            estado__in=['Reservada', 'finalizada']  # Filtrar tanto por Reservada como Finalizada
+        )
 
         fechas_disponibles = []
         hoy = datetime.today().date()
@@ -246,33 +256,49 @@ def fechas_disponibles_por_especialidad(request, especialidad_id):
 
         fecha_actual = hoy
         while fecha_actual <= fecha_final:
-            
             dias_traduccion = {
-            'monday': 'Lunes',
-            'tuesday': 'Martes',
-            'wednesday': 'Miércoles',
-            'thursday': 'Jueves',
-            'friday': 'Viernes',
-            'saturday': 'Sábado',
-            'sunday': 'Domingo',
-                            }
+                'monday': 'Lunes',
+                'tuesday': 'Martes',
+                'wednesday': 'Miércoles',
+                'thursday': 'Jueves',
+                'friday': 'Viernes',
+                'saturday': 'Sábado',
+                'sunday': 'Domingo',
+            }
             dia_semana = dias_traduccion.get(fecha_actual.strftime('%A').lower(), '')
 
+            horarios_dia = horarios.filter(dia_semana=dia_semana)
 
-            for horario in horarios.filter(dia_semana=dia_semana):
-                medico_nombre = (
-                    f"{horario.medico.user.first_name} {horario.medico.user.last_name}"
-                    if horario.medico else "Sin asignar"
-                )
+            # Crear un conjunto de horas ocupadas para esta fecha
+            horas_ocupadas = set(
+                cita.hora.strftime('%H:%M') for cita in citas_ocupadas.filter(fecha=fecha_actual)
+            )
 
-                fechas_disponibles.append({
-                    "fecha": fecha_actual.strftime('%d-%B-%Y'),
-                    "dia_semana": horario.get_dia_semana_display(),
-                    "hora_inicio": horario.hora_inicio.strftime('%H:%M'),
-                    "hora_fin": horario.hora_fin.strftime('%H:%M'),
-                    "medico": medico_nombre,
-                    "medico_id": horario.medico.id if horario.medico else None,
-                })
+            for horario in horarios_dia:
+                # Generar las horas dentro del rango del horario
+                hora_actual = datetime.combine(fecha_actual, horario.hora_inicio)
+                hora_fin = datetime.combine(fecha_actual, horario.hora_fin)
+
+                horas_disponibles = []
+                while hora_actual < hora_fin:
+                    hora_str = hora_actual.strftime('%H:%M')
+                    if hora_str not in horas_ocupadas:
+                        horas_disponibles.append(hora_str)
+                    hora_actual += timedelta(hours=1)
+
+                if horas_disponibles:  # Solo agregar si hay horas disponibles
+                    medico_nombre = (
+                        f"{horario.medico.user.first_name} {horario.medico.user.last_name}"
+                        if horario.medico else "Sin asignar"
+                    )
+
+                    fechas_disponibles.append({
+                        "fecha": fecha_actual.strftime('%d-%B-%Y'),
+                        "dia_semana": horario.get_dia_semana_display(),
+                        "horarios": horas_disponibles,
+                        "medico": medico_nombre,
+                        "medico_id": horario.medico.id if horario.medico else None,
+                    })
 
             fecha_actual += timedelta(days=1)
 
@@ -282,6 +308,12 @@ def fechas_disponibles_por_especialidad(request, especialidad_id):
 
     except Especialidad.DoesNotExist:
         return JsonResponse({"error": "Especialidad no encontrada."}, status=404)
+
+
+
+
+
+
 
 
 
@@ -334,19 +366,80 @@ def crear_cita(request):
 @api_view(['POST'])
 def crear_diagnostico(request, cita_id):
     try:
+        # Obtén la cita asociada al diagnóstico
         cita = get_object_or_404(Cita, id=cita_id)
-        data = request.data
-        data['cita'] = cita.id
 
-        serializer = DiagnosticoSerializer(data=data)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        # Obtén los datos enviados en la solicitud
+        descripcion = request.data.get('descripcion')
+        es_covid = request.data.get('es_covid', False)
+        enfermedad_id = request.data.get('enfermedad')  # ID de la enfermedad
+
+        # Validar que la enfermedad exista
+        enfermedad = get_object_or_404(Enfermedad, id=enfermedad_id)
+
+        # Asegúrate de usar el `User` asociado al médico
+        medico_user = cita.medico.user
+
+        # Crear el diagnóstico
+        diagnostico = Diagnostico.objects.create(
+            descripcion=descripcion,
+            es_covid=es_covid,
+            medico=medico_user,
+            paciente=cita.paciente,
+            enfermedad=enfermedad  # Asociar la enfermedad
+        )
+
+        return Response({
+            "id": diagnostico.id,
+            "descripcion": diagnostico.descripcion,
+            "es_covid": diagnostico.es_covid,
+            "enfermedad": diagnostico.enfermedad.nombre,  # Incluye el nombre de la enfermedad en la respuesta
+            "created_at": diagnostico.created_at,
+        }, status=201)
 
     except Exception as e:
-        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-    
+        return Response({'error': str(e)}, status=400)
+
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework import status
+from .models import Receta, Diagnostico
+from .serializers import RecetaSerializer
+
+@api_view(['POST'])
+def crear_receta(request):
+    try:
+        diagnostico_id = request.data.get('diagnostico_id')
+        medicamentos = request.data.get('medicamentos', [])
+        notas = request.data.get('notas', "")
+
+        # Validar si el diagnóstico existe
+        diagnostico = Diagnostico.objects.get(id=diagnostico_id)
+
+        # Crear cada medicamento como una entrada de receta
+        recetas_creadas = []
+        for medicamento in medicamentos:
+            receta = Receta.objects.create(
+                diagnostico=diagnostico,
+                nombre_medicamento=medicamento.get('nombre_medicamento', ""),
+                dosis=medicamento.get('dosis', "No especificada"),
+                duracion=medicamento.get('duracion', "No especificada"),
+                prescripcion=medicamento.get('prescripcion', ""),
+                notas=notas,
+            )
+            recetas_creadas.append(receta)
+
+        # Serializar y retornar la primera receta creada como respuesta
+        serializer = RecetaSerializer(recetas_creadas, many=True)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    except Diagnostico.DoesNotExist:
+        return Response({"error": "El diagnóstico no existe."}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
 @api_view(['PATCH'])
 def finalizar_cita(request, cita_id):
     try:
@@ -381,41 +474,26 @@ def listar_enfermedades(request):
     return Response(data)
 
 @api_view(['POST'])
-def crear_ficha_medica(request, cita_id):
+def crear_ficha_medica(request):
     try:
-        # Obtener los datos de la cita
-        cita = Cita.objects.get(id=cita_id)
+        cita_id = request.data.get('cita_id')
+        diagnostico_id = request.data.get('diagnostico_id')
+        receta_id = request.data.get('receta_id')
 
-        # Obtener datos del diagnóstico
-        diagnostico_data = request.data.get('diagnostico')
-        tipo_enfermedad = request.data.get('tipo_enfermedad')
-        medicamentos = request.data.get('medicamentos')
+        cita = get_object_or_404(Cita, id=cita_id)
+        diagnostico = get_object_or_404(Diagnostico, id=diagnostico_id)
+        receta = get_object_or_404(Receta, id=receta_id)
 
-        if not diagnostico_data or not tipo_enfermedad or not medicamentos:
-            return Response({"error": "Faltan datos necesarios para crear la ficha médica."}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Crear el diagnóstico
-        diagnostico = Diagnostico.objects.create(
-            descripcion=diagnostico_data.get('descripcion'),
-            es_covid=diagnostico_data.get('es_covid', False),
-            medico=cita.medico,  # Asociar al médico de la cita
-            paciente=cita.paciente  # Asociar al paciente de la cita
-        )
-
-        # Crear la ficha médica asociada al diagnóstico
         ficha_medica = FichaMedica.objects.create(
             cita=cita,
-            diagnostico=diagnostico,  # Asociar el diagnóstico recién creado
-            tipo_enfermedad=tipo_enfermedad,
-            medicamentos=medicamentos
+            diagnostico=diagnostico,
+            receta=receta,
         )
 
-        return Response({
-            "mensaje": "Ficha médica creada exitosamente.",
-            "ficha_id": ficha_medica.id
-        }, status=status.HTTP_201_CREATED)
+        cita.estado = 'finalizada'
+        cita.save()
 
-    except Cita.DoesNotExist:
-        return Response({"error": "Cita no encontrada."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"id": ficha_medica.id}, status=status.HTTP_201_CREATED)
+
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)

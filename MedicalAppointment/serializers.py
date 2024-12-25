@@ -38,6 +38,7 @@ class AdministradorSerializer(serializers.ModelSerializer):
 class CitaSerializer(serializers.ModelSerializer):
     # Esto anida todo el JSON del paciente
     paciente = PacienteSerializer(read_only=True)
+    medico_id = serializers.IntegerField(source="medico.id", read_only=True)  # Agrega este campo
 
     # Esto mantiene el nombre completo del médico, tal y como lo hacías antes
     medico_nombre = serializers.SerializerMethodField()
@@ -48,7 +49,8 @@ class CitaSerializer(serializers.ModelSerializer):
             'id', 'fecha', 'hora', 'estado', 'direccion', 'descripcion', 'motivo',
             'paciente',       # <--- Devuelve los datos completos del paciente
             'medico_nombre',
-            'especialidad'
+            'especialidad', 
+            'medico_id'
         ]
 
     def get_medico_nombre(self, obj):
@@ -79,7 +81,7 @@ class LoginSerializer(serializers.Serializer):
 class RecetaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Receta
-        fields = '__all__'
+        fields = ['id', 'diagnostico', 'nombre_medicamento', 'dosis', 'duracion', 'prescripcion', 'created_at', 'notas']
 
 class DiagnosticoSerializer(serializers.ModelSerializer):
     recetas = RecetaSerializer(many=True)
