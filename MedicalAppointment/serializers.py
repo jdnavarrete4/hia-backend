@@ -8,10 +8,17 @@ class PacienteSerializer(serializers.ModelSerializer):
     first_name = serializers.CharField(source='user.first_name', read_only=True)
     last_name = serializers.CharField(source='user.last_name', read_only=True)
     email = serializers.CharField(source='user.email', read_only=True)
+    provincia_nombre = serializers.CharField(source='provincia.nombre', read_only=True)
+    canton_nombre = serializers.CharField(source='canton.nombre', read_only=True)
 
     class Meta:
         model = Paciente
-        fields = ['id', 'telefono', 'numero_cedula', 'fecha_nacimiento', 'direccion', 'first_name', 'last_name', 'email']
+        fields = [
+            'id', 'telefono', 'numero_cedula', 'fecha_nacimiento', 'direccion',
+            'provincia', 'provincia_nombre', 'canton', 'canton_nombre', 'genero',
+            'first_name', 'last_name', 'email'
+        ]
+
 
 
 class RegistroPacienteSerializer(serializers.ModelSerializer):

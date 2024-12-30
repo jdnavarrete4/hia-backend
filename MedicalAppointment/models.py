@@ -4,15 +4,29 @@ from django.contrib.auth.models import User
 from django.utils.timezone import now
 
 
-class Paciente(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE)  # Relación con User
-    telefono = models.CharField(max_length=15)
-    numero_cedula = models.CharField(max_length=20, unique=True)
-    fecha_nacimiento = models.DateField()
-    direccion = models.CharField(max_length=255, blank=True, null=True)
+class Provincia(models.Model):
+    nombre = models.CharField(max_length=100, unique=True)
 
     def __str__(self):
-        return f'{self.user.first_name} {self.user.last_name}'
+        return self.nombre
+
+class Canton(models.Model):
+    nombre = models.CharField(max_length=100)
+    provincia = models.ForeignKey(Provincia, on_delete=models.CASCADE, related_name='cantones')
+
+    def __str__(self):
+        return f"{self.nombre} ({self.provincia.nombre})"
+    
+class Paciente(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    telefono = models.CharField(max_length=15)
+    numero_cedula = models.CharField(max_length=10)
+    fecha_nacimiento = models.DateField()
+    direccion = models.TextField(blank=True, null=True)
+    provincia = models.ForeignKey(Provincia, on_delete=models.CASCADE)
+    canton = models.ForeignKey(Canton, on_delete=models.CASCADE)
+    genero = models.CharField(max_length=20, choices=[('Masculino', 'Masculino'), ('Femenino', 'Femenino'), ('Otro', 'Otro')])
+
     
 class Especialidad(models.Model):
     nombre = models.CharField(max_length=100, unique=True)
@@ -104,18 +118,7 @@ class Notificacion(models.Model):
     def __str__(self):
         return f"{self.fecha} - {self.paciente} - {'Leída' if self.leida else 'No Leída'}"
 
-class Provincia(models.Model):
-    nombre = models.CharField(max_length=100, unique=True)
 
-    def __str__(self):
-        return self.nombre
-
-class Canton(models.Model):
-    nombre = models.CharField(max_length=100)
-    provincia = models.ForeignKey(Provincia, on_delete=models.CASCADE, related_name='cantones')
-
-    def __str__(self):
-        return f"{self.nombre} ({self.provincia.nombre})"
     
 class Horario(models.Model):
     especialidad = models.ForeignKey(Especialidad, on_delete=models.CASCADE, related_name='horarios')

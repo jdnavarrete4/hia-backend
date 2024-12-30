@@ -5,7 +5,7 @@ from django.shortcuts import get_object_or_404
 from rest_framework import status, generics
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from .models import Diagnostico, Enfermedad, Especialidad, Horario, Paciente, Medico,Administrador
+from .models import Diagnostico, Enfermedad, Especialidad, Horario, Paciente, Medico,Administrador, Canton
 from .serializers import PacienteSerializer, MedicoSerializer, RecetaSerializer
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import api_view, permission_classes
@@ -20,6 +20,8 @@ from django.http import JsonResponse
 from rest_framework.pagination import PageNumberPagination
 from .serializers import CitaSerializer,DiagnosticoSerializer
 from .models import Cita, FichaMedica
+from datetime import datetime, timedelta
+import pytz
 
 
 
@@ -45,21 +47,33 @@ def registrar_paciente(request):
             grupo_paciente = Group.objects.get(name='paciente')
             user.groups.add(grupo_paciente)
 
+            # Validar que provincia y cantón existan
+            provincia = Provincia.objects.get(id=data['provincia'])
+            canton = Canton.objects.get(id=data['canton'])
+
             # Crear el paciente asociado al usuario
             paciente = Paciente.objects.create(
                 user=user,
                 telefono=data['telefono'],
                 numero_cedula=data['numero_cedula'],
                 fecha_nacimiento=data['fecha_nacimiento'],
-                direccion=data.get('direccion', "")  # Dirección opcional
+                direccion=data.get('direccion', ""),  # Dirección opcional
+                provincia=provincia,
+                canton=canton,
+                genero=data['genero']
             )
 
             # Serializar el paciente para la respuesta
             serializer = PacienteSerializer(paciente)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
+        except Provincia.DoesNotExist:
+            return Response({'error': 'La provincia especificada no existe.'}, status=status.HTTP_400_BAD_REQUEST)
+        except Canton.DoesNotExist:
+            return Response({'error': 'El cantón especificado no existe o no pertenece a la provincia.'}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -135,7 +149,8 @@ def get_patient_data(request):
             'correo_electronico': request.user.email,
             'telefono': paciente.telefono,
             'edad': edad,
-            'rol': rol.capitalize()
+            'rol': rol.capitalize(),
+            'genero': paciente.genero
         }
         return Response(data, status=200)
 
@@ -241,17 +256,22 @@ from django.db.models import Q
 @api_view(['GET'])
 def fechas_disponibles_por_especialidad(request, especialidad_id):
     try:
+        # Zona horaria de Ecuador
+        ecuador_tz = pytz.timezone("America/Guayaquil")
+        ahora = datetime.now(ecuador_tz)  # Obtener la fecha y hora actual en Ecuador
+
         especialidad = Especialidad.objects.get(id=especialidad_id)
         horarios = Horario.objects.filter(especialidad_id=especialidad_id)
 
-        # Obtener las citas con estado Reservada o Finalizada
+        # Obtener las citas reservadas o finalizadas
         citas_ocupadas = Cita.objects.filter(
             especialidad=especialidad,
-            estado__in=['Reservada', 'finalizada']  # Filtrar tanto por Reservada como Finalizada
+            estado__in=['Reservada', 'Finalizada']
         )
 
-        fechas_disponibles = []
-        hoy = datetime.today().date()
+        # Diccionario para consolidar fechas y horarios
+        fechas_agrupadas = {}
+        hoy = ahora.date()  # Fecha actual
         fecha_final = hoy + timedelta(days=365)
 
         fecha_actual = hoy
@@ -276,14 +296,19 @@ def fechas_disponibles_por_especialidad(request, especialidad_id):
 
             for horario in horarios_dia:
                 # Generar las horas dentro del rango del horario
-                hora_actual = datetime.combine(fecha_actual, horario.hora_inicio)
-                hora_fin = datetime.combine(fecha_actual, horario.hora_fin)
+                hora_actual = datetime.combine(fecha_actual, horario.hora_inicio, tzinfo=ecuador_tz)
+                hora_fin = datetime.combine(fecha_actual, horario.hora_fin, tzinfo=ecuador_tz)
 
                 horas_disponibles = []
                 while hora_actual < hora_fin:
                     hora_str = hora_actual.strftime('%H:%M')
-                    if hora_str not in horas_ocupadas:
+
+                    # Verificar que la hora no esté ocupada y no sea anterior a la hora actual
+                    if hora_str not in horas_ocupadas and (
+                        fecha_actual > hoy or hora_actual.time() > ahora.time()
+                    ):
                         horas_disponibles.append(hora_str)
+
                     hora_actual += timedelta(hours=1)
 
                 if horas_disponibles:  # Solo agregar si hay horas disponibles
@@ -292,15 +317,23 @@ def fechas_disponibles_por_especialidad(request, especialidad_id):
                         if horario.medico else "Sin asignar"
                     )
 
-                    fechas_disponibles.append({
-                        "fecha": fecha_actual.strftime('%d-%B-%Y'),
-                        "dia_semana": horario.get_dia_semana_display(),
-                        "horarios": horas_disponibles,
-                        "medico": medico_nombre,
-                        "medico_id": horario.medico.id if horario.medico else None,
-                    })
+                    # Consolidar horarios por fecha
+                    if fecha_actual not in fechas_agrupadas:
+                        fechas_agrupadas[fecha_actual] = {
+                            "fecha": fecha_actual.strftime('%d-%B-%Y'),
+                            "dia_semana": dia_semana,
+                            "horarios": horas_disponibles,
+                            "medico": medico_nombre,
+                            "medico_id": horario.medico.id if horario.medico else None,
+                        }
+                    else:
+                        # Agregar más horarios a la misma fecha
+                        fechas_agrupadas[fecha_actual]["horarios"].extend(horas_disponibles)
 
             fecha_actual += timedelta(days=1)
+
+        # Convertir el diccionario a una lista
+        fechas_disponibles = list(fechas_agrupadas.values())
 
         paginator = CustomPagination()
         paginated_fechas = paginator.paginate_queryset(fechas_disponibles, request)
@@ -308,7 +341,6 @@ def fechas_disponibles_por_especialidad(request, especialidad_id):
 
     except Especialidad.DoesNotExist:
         return JsonResponse({"error": "Especialidad no encontrada."}, status=404)
-
 
 
 
