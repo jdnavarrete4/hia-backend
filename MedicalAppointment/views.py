@@ -22,6 +22,7 @@ from .serializers import CitaSerializer,DiagnosticoSerializer
 from .models import Cita, FichaMedica
 from datetime import datetime, timedelta
 import pytz
+from django.db.models import Count, Q
 
 
 
@@ -269,13 +270,29 @@ def fechas_disponibles_por_especialidad(request, especialidad_id):
             estado__in=['Reservada', 'Finalizada']
         )
 
+        # Obtener parámetros de rango de fechas
+        start_date_str = request.query_params.get('start_date')
+        end_date_str = request.query_params.get('end_date')
+
+        if start_date_str and end_date_str:
+            try:
+                start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+                end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+            except ValueError:
+                return JsonResponse(
+                    {"error": "Formato de fecha no válido. Use 'YYYY-MM-DD'."},
+                    status=400
+                )
+        else:
+            # Si no se proporcionan fechas, usar rango predeterminado de un año
+            start_date = ahora.date()
+            end_date = start_date + timedelta(days=365)
+
         # Diccionario para consolidar fechas y horarios
         fechas_agrupadas = {}
-        hoy = ahora.date()  # Fecha actual
-        fecha_final = hoy + timedelta(days=365)
 
-        fecha_actual = hoy
-        while fecha_actual <= fecha_final:
+        fecha_actual = start_date
+        while fecha_actual <= end_date:
             dias_traduccion = {
                 'monday': 'Lunes',
                 'tuesday': 'Martes',
@@ -305,7 +322,7 @@ def fechas_disponibles_por_especialidad(request, especialidad_id):
 
                     # Verificar que la hora no esté ocupada y no sea anterior a la hora actual
                     if hora_str not in horas_ocupadas and (
-                        fecha_actual > hoy or hora_actual.time() > ahora.time()
+                        fecha_actual > ahora.date() or hora_actual.time() > ahora.time()
                     ):
                         horas_disponibles.append(hora_str)
 
@@ -341,6 +358,7 @@ def fechas_disponibles_por_especialidad(request, especialidad_id):
 
     except Especialidad.DoesNotExist:
         return JsonResponse({"error": "Especialidad no encontrada."}, status=404)
+
 
 
 
@@ -529,3 +547,152 @@ def crear_ficha_medica(request):
 
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def estadisticas_covid(request):
+    try:
+        # Filtrar fichas médicas con diagnósticos de COVID
+        fichas_covid = FichaMedica.objects.filter(diagnostico__es_covid=True)
+
+        # Agrupar por fecha de la cita y género del paciente
+        estadisticas = fichas_covid.values(
+            'cita__fecha', 'cita__paciente__genero'
+        ).annotate(
+            total=Count('id')
+        ).order_by('cita__fecha')
+
+        # Formatear los datos para la respuesta
+        data = {}
+        for item in estadisticas:
+            fecha = item["cita__fecha"]
+            genero = item["cita__paciente__genero"]
+            total = item["total"]
+
+            if fecha not in data:
+                data[fecha] = {"fecha": fecha, "hombres": 0, "mujeres": 0}
+
+            if genero == 'Masculino':  # Ajustado para usar el formato correcto
+                data[fecha]["hombres"] += total
+            elif genero == 'Femenino':  # Ajustado para usar el formato correcto
+                data[fecha]["mujeres"] += total
+
+        # Convertir el diccionario a una lista
+        return Response(list(data.values()), status=200)
+
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)
+
+@api_view(['GET'])
+def estadisticas_por_provincia(request):
+    try:
+        # Agrupar por provincia y género
+        datos = (
+            Paciente.objects.values('provincia__nombre', 'genero')
+            .annotate(total=Count('id'))
+            .order_by('provincia__nombre')
+        )
+
+        # Estructurar los datos para el frontend
+        provincias = {}
+        for dato in datos:
+            provincia = dato['provincia__nombre']
+            genero = dato['genero']
+            total = dato['total']
+
+            if provincia not in provincias:
+                provincias[provincia] = {'hombres': 0, 'mujeres': 0}
+
+            if genero == 'Masculino':
+                provincias[provincia]['hombres'] += total
+            elif genero == 'Femenino':
+                provincias[provincia]['mujeres'] += total
+
+        # Calcular el total global
+        total_global = sum(
+            provincia['hombres'] + provincia['mujeres'] for provincia in provincias.values()
+        )
+
+        # Formatear respuesta
+        respuesta = [
+            {
+                'provincia': provincia,
+                'hombres': data['hombres'],
+                'mujeres': data['mujeres'],
+                'porcentaje': round(
+                    ((data['hombres'] + data['mujeres']) / total_global) * 100, 1
+                )
+            }
+            for provincia, data in provincias.items()
+        ]
+
+        return Response({
+            'total_global': total_global,
+            'datos': respuesta
+        }, status=200)
+
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+    
+
+@api_view(['GET'])
+def estadisticas_por_especialidad(request):
+    try:
+        # Agrupar citas finalizadas por especialidad
+        datos = (
+            Cita.objects.filter(estado__in=['Reservada', 'finalizada'])
+            .values('especialidad__nombre')
+            .annotate(total=Count('id'))
+            .order_by('-total')  # Ordenar de mayor a menor
+        )
+
+        # Total global de citas
+        total_global = sum(d['total'] for d in datos)
+
+        # Formatear respuesta
+        respuesta = {
+            'total_global': total_global,
+            'datos': [
+                {
+                    'especialidad': dato['especialidad__nombre'],
+                    'total': dato['total'],
+                    'porcentaje': round((dato['total'] / total_global) * 100, 2)
+                }
+                for dato in datos
+            ]
+        }
+
+        return Response(respuesta, status=200)
+
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+    
+@api_view(['GET'])
+def enfermedades_mas_comunes(request):
+    try:
+        # Contar diagnósticos agrupados por enfermedad
+        datos = (
+            Diagnostico.objects.values('enfermedad__nombre')
+            .annotate(total=Count('id'))
+            .order_by('-total')  # Ordenar de mayor a menor
+        )
+
+        # Total de diagnósticos
+        total_global = sum(d['total'] for d in datos)
+
+        # Formatear respuesta
+        respuesta = {
+            'total_global': total_global,
+            'datos': [
+                {
+                    'enfermedad': dato['enfermedad__nombre'],
+                    'total': dato['total']
+                }
+                for dato in datos
+            ]
+        }
+
+        return Response(respuesta, status=200)
+
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
