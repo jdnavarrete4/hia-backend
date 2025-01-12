@@ -70,11 +70,7 @@ class Administrador(models.Model):
 # models.py
 
 class Cita(models.Model):
-    # Antes:
-    # usuario = models.ForeignKey(User, ...)
-    # Ahora:
     paciente = models.ForeignKey(Paciente, on_delete=models.CASCADE, related_name="citas")
-
     especialidad = models.ForeignKey(Especialidad, on_delete=models.CASCADE)
     medico = models.ForeignKey(Medico, on_delete=models.CASCADE, related_name="citas")
     fecha = models.DateField()
@@ -91,6 +87,11 @@ class Cita(models.Model):
     direccion = models.CharField(max_length=255)
     descripcion = models.TextField(blank=True, null=True)
     motivo = models.CharField(max_length=255, blank=True, null=True)
+    calificacion = models.IntegerField(
+        null=True, 
+        blank=True, 
+        help_text="Calificación de la cita (1-5, solo para citas finalizadas)."
+    )
 
     class Meta:
         ordering = ['fecha', 'hora']

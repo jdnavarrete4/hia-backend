@@ -267,7 +267,7 @@ def fechas_disponibles_por_especialidad(request, especialidad_id):
         # Obtener las citas reservadas o finalizadas
         citas_ocupadas = Cita.objects.filter(
             especialidad=especialidad,
-            estado__in=['Reservada', 'Finalizada']
+            estado__in=['Reservada', 'finalizada']
         )
 
         # Obtener parámetros de rango de fechas
@@ -572,9 +572,9 @@ def estadisticas_covid(request):
             if fecha not in data:
                 data[fecha] = {"fecha": fecha, "hombres": 0, "mujeres": 0}
 
-            if genero == 'Masculino':  # Ajustado para usar el formato correcto
+            if genero == 'Masculino':  
                 data[fecha]["hombres"] += total
-            elif genero == 'Femenino':  # Ajustado para usar el formato correcto
+            elif genero == 'Femenino': 
                 data[fecha]["mujeres"] += total
 
         # Convertir el diccionario a una lista
@@ -643,7 +643,7 @@ def estadisticas_por_especialidad(request):
             Cita.objects.filter(estado__in=['Reservada', 'finalizada'])
             .values('especialidad__nombre')
             .annotate(total=Count('id'))
-            .order_by('-total')  # Ordenar de mayor a menor
+            .order_by('-total')  
         )
 
         # Total global de citas
@@ -674,7 +674,7 @@ def enfermedades_mas_comunes(request):
         datos = (
             Diagnostico.objects.values('enfermedad__nombre')
             .annotate(total=Count('id'))
-            .order_by('-total')  # Ordenar de mayor a menor
+            .order_by('-total')  
         )
 
         # Total de diagnósticos
@@ -693,6 +693,89 @@ def enfermedades_mas_comunes(request):
         }
 
         return Response(respuesta, status=200)
+
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+    
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def historial_citas_paciente(request):
+    try:
+        # Obtener el paciente autenticado
+        paciente = request.user.paciente
+
+        # Filtrar todas las citas del paciente (reservadas y finalizadas)
+        citas = Cita.objects.filter(paciente=paciente).order_by('-fecha', '-hora')
+
+        # Construir la respuesta
+        data = []
+        for cita in citas:
+            # Inicializar datos de diagnóstico y receta como None
+            diagnostico_detalle = None
+            recetas_detalle = []
+
+            # Si la cita está finalizada, obtener datos de diagnóstico y receta
+            if cita.estado == 'finalizada':
+                ficha_medica = getattr(cita, 'ficha_medica', None)
+                if ficha_medica and ficha_medica.diagnostico:
+                    diagnostico = ficha_medica.diagnostico
+                    diagnostico_detalle = {
+                        "descripcion": diagnostico.descripcion,
+                        "es_covid": diagnostico.es_covid,
+                        "enfermedad": diagnostico.enfermedad.nombre if diagnostico.enfermedad else None
+                    }
+
+                    # Obtener todas las recetas asociadas al diagnóstico
+                    recetas = diagnostico.recetas.all()
+                    recetas_detalle = [
+                        {
+                            "nombre_medicamento": receta.nombre_medicamento,
+                            "dosis": receta.dosis,
+                            "duracion": receta.duracion,
+                            "prescripcion": receta.prescripcion,
+                        }
+                        for receta in recetas
+                    ]
+
+            # Agregar los datos de la cita a la respuesta
+            data.append({
+                'id': cita.id,
+                'fecha': cita.fecha.strftime('%d-%m-%Y'),
+                'hora': cita.hora.strftime('%H:%M'),
+                'estado': cita.estado,
+                'especialidad': cita.especialidad.nombre,
+                'medico': f"{cita.medico.user.first_name} {cita.medico.user.last_name}",
+                'direccion': cita.direccion,
+                'calificacion': cita.calificacion,
+                'diagnostico': diagnostico_detalle,  # Solo para finalizadas
+                'recetas': recetas_detalle,         # Lista de medicamentos
+            })
+
+        return Response(data, status=200)
+
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+
+    
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def calificar_cita(request, cita_id):
+    try:
+        cita = get_object_or_404(Cita, id=cita_id, paciente__user=request.user)
+
+        if cita.estado != 'finalizada':
+            return Response({'error': 'Solo se pueden calificar citas finalizadas.'}, status=400)
+
+        calificacion = request.data.get('calificacion')
+        if not (1 <= int(calificacion) <= 5):
+            return Response({'error': 'La calificación debe estar entre 1 y 5.'}, status=400)
+
+        cita.calificacion = calificacion
+        cita.save()
+
+        return Response({'mensaje': 'Cita calificada con éxito.'}, status=200)
 
     except Exception as e:
         return Response({'error': str(e)}, status=500)

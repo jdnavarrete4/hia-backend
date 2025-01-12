@@ -7,6 +7,7 @@ from rest_framework.routers import DefaultRouter
 # Importar vistas y módulos necesarios
 from . import api_views
 from .views import (
+    calificar_cita,
     citas_por_especialidad,
     crear_cita,
     crear_diagnostico,
@@ -17,6 +18,7 @@ from .views import (
     estadisticas_por_especialidad,
     estadisticas_por_provincia,
     fechas_disponibles_por_especialidad,
+    historial_citas_paciente,
     horarios_disponibles,
     listar_enfermedades,
     listar_medicos_por_especialidad,
@@ -59,7 +61,8 @@ urlpatterns = [
     path('api/estadisticas-por-provincia/', estadisticas_por_provincia, name='estadisticas_por_provincia'),
     path('api/estadisticas-por-especialidad/', estadisticas_por_especialidad,name='estadisticas_por_especialidad'),
     path('api/enfermedades-mas-comunes/', enfermedades_mas_comunes,name='enfermedades_mas_comunes'),
-
+    path('api/historial-paciente/', historial_citas_paciente,name='historial_citas_paciente'),
+    path('api/citas/<int:cita_id>/calificar/', calificar_cita, name='calificar_cita'),
 
 ]
 
