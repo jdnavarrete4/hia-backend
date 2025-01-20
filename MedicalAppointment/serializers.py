@@ -28,9 +28,24 @@ class RegistroPacienteSerializer(serializers.ModelSerializer):
       
 
 class MedicoSerializer(serializers.ModelSerializer):
+    nombre = serializers.CharField(source='user.first_name', read_only=True)
+    apellido = serializers.CharField(source='user.last_name', read_only=True)
+    especialidad_nombre = serializers.CharField(source='especialidad.nombre', read_only=True)
+
+
     class Meta:
         model = Medico
-        fields = '__all__'
+        fields = [
+            'id',
+            'telefono',
+            'descripcion',
+            'foto',
+            'especialidad',
+            'especialidad_nombre',
+            'user',
+            'nombre',
+            'apellido',
+        ]
 
 class AdministradorSerializer(serializers.ModelSerializer):
     class Meta:

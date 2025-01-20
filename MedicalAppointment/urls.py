@@ -15,9 +15,11 @@ from .views import (
     crear_receta,
     enfermedades_mas_comunes,
     estadisticas_covid,
+    estadisticas_eficiencia,
     estadisticas_por_especialidad,
     estadisticas_por_provincia,
     fechas_disponibles_por_especialidad,
+    get_doctor_data,
     historial_citas_paciente,
     horarios_disponibles,
     listar_enfermedades,
@@ -45,6 +47,7 @@ urlpatterns = [
     path('register/', registrar_paciente, name='registrar_paciente'),
     path('login/', login, name='login'),
     path('api/patient-data/', get_patient_data, name='get_patient_data'),
+    path('api/doctor-data/', get_doctor_data, name='get_doctor_data'),
     path('api/provincias-cantones/', obtener_provincias_y_cantones, name='provincias-cantones'),
     path('api/especialidades/', obtener_especialidades, name='obtener_especialidades'),
     path('api/medicos/<str:especialidad>/', listar_medicos_por_especialidad, name='listar_medicos_por_especialidad'),
@@ -63,6 +66,7 @@ urlpatterns = [
     path('api/enfermedades-mas-comunes/', enfermedades_mas_comunes,name='enfermedades_mas_comunes'),
     path('api/historial-paciente/', historial_citas_paciente,name='historial_citas_paciente'),
     path('api/citas/<int:cita_id>/calificar/', calificar_cita, name='calificar_cita'),
+    path('api/estadisticas-eficiencia/', estadisticas_eficiencia,name='estadisticas_eficiencia'),
 
 ]
 

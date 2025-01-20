@@ -22,7 +22,10 @@ from .serializers import CitaSerializer,DiagnosticoSerializer
 from .models import Cita, FichaMedica
 from datetime import datetime, timedelta
 import pytz
-from django.db.models import Count, Q
+import calendar 
+from django.db.models import Count, Q, F
+from django.db.models import Avg
+from django.db.models.functions import TruncDay, TruncWeek, TruncMonth
 
 
 
@@ -157,6 +160,35 @@ def get_patient_data(request):
 
     except AttributeError:
         return Response({'error': 'Paciente no encontrado'}, status=404)
+    
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_doctor_data(request):
+    try:
+        # Obtener el modelo Médico relacionado con el usuario autenticado
+        medico = request.user.medico
+
+        # Determinar el rol del usuario desde los grupos
+        if request.user.groups.filter(name='medico').exists():
+            rol = 'medico'
+        else:
+            rol = 'desconocido'
+
+        # Preparar los datos de respuesta
+        data = {
+            'id': medico.id,
+            'nombre': request.user.first_name,
+            'apellido': request.user.last_name,
+            'especialidad': medico.especialidad.nombre,  # Ajusta según tu modelo
+            'correo_electronico': request.user.email,
+            'telefono': medico.telefono,  # Si tienes un campo para teléfono
+            'rol': rol.capitalize(),
+        }
+
+        return Response(data, status=200)
+
+    except AttributeError:
+        return Response({'error': 'Médico no encontrado'}, status=404)
     
 @api_view(['GET'])
 def obtener_provincias_y_cantones(request):
@@ -552,33 +584,81 @@ def crear_ficha_medica(request):
 @permission_classes([IsAuthenticated])
 def estadisticas_covid(request):
     try:
-        # Filtrar fichas médicas con diagnósticos de COVID
-        fichas_covid = FichaMedica.objects.filter(diagnostico__es_covid=True)
+  
+        intervalo = request.query_params.get('intervalo', 'mes')  
 
-        # Agrupar por fecha de la cita y género del paciente
-        estadisticas = fichas_covid.values(
-            'cita__fecha', 'cita__paciente__genero'
-        ).annotate(
-            total=Count('id')
-        ).order_by('cita__fecha')
+        # Fecha actual
+        hoy = date.today()
+
+        # Filtrar las fechas según el intervalo
+        if intervalo == 'semana':
+            inicio_semana = hoy - timedelta(days=hoy.weekday())  # Lunes de la semana actual
+            fin_semana = inicio_semana + timedelta(days=6)  # Domingo de la semana actual
+            fichas_covid = FichaMedica.objects.filter(
+                diagnostico__es_covid=True,
+                cita__fecha__range=(inicio_semana, fin_semana)
+            )
+            trunc_function = TruncDay  # Agrupar por día dentro de la semana
+        elif intervalo == 'mes':
+            inicio_mes = hoy.replace(day=1)  # Primer día del mes actual
+            fin_mes = (hoy.replace(day=1) + timedelta(days=31)).replace(day=1) - timedelta(days=1) 
+            fichas_covid = FichaMedica.objects.filter(
+                diagnostico__es_covid=True,
+                cita__fecha__range=(inicio_mes, fin_mes)
+            )
+            trunc_function = TruncDay  # Agrupar por día dentro del mes
+        elif intervalo == 'anio':  # Caso para año
+            inicio_anio = hoy.replace(month=1, day=1)  # Primer día del año actual
+            fin_anio = hoy.replace(month=12, day=31)  # Último día del año actual
+            fichas_covid = FichaMedica.objects.filter(
+                diagnostico__es_covid=True,
+                cita__fecha__year=hoy.year
+            )
+            trunc_function = TruncMonth  # Agrupar por mes dentro del año
+        else:
+            # Intervalo por día (hoy)
+            fichas_covid = FichaMedica.objects.filter(
+                diagnostico__es_covid=True,
+                cita__fecha=hoy
+            )
+            trunc_function = TruncDay
+
+        # Agrupar por el intervalo seleccionado
+        estadisticas = (
+            fichas_covid.annotate(intervalo=trunc_function('cita__fecha'))
+            .values('intervalo', 'cita__paciente__genero')
+            .annotate(total=Count('id'))
+            .order_by('intervalo')
+        )
 
         # Formatear los datos para la respuesta
         data = {}
         for item in estadisticas:
-            fecha = item["cita__fecha"]
+            intervalo_valor = item["intervalo"]
             genero = item["cita__paciente__genero"]
             total = item["total"]
+
+            if intervalo == 'anio':  # Mostrar el nombre del mes en lugar de la fecha
+                fecha = calendar.month_name[intervalo_valor.month]  # Obtiene el nombre del mes
+            else:
+                fecha = intervalo_valor  # Mantener la fecha original para día/semana/mes
 
             if fecha not in data:
                 data[fecha] = {"fecha": fecha, "hombres": 0, "mujeres": 0}
 
-            if genero == 'Masculino':  
+            if genero == 'Masculino':
                 data[fecha]["hombres"] += total
-            elif genero == 'Femenino': 
+            elif genero == 'Femenino':
                 data[fecha]["mujeres"] += total
 
         # Convertir el diccionario a una lista
-        return Response(list(data.values()), status=200)
+        resultado = list(data.values())
+
+        # Verificar si no hay datos
+        if not resultado:
+            return Response({"message": "No existen datos para la fecha seleccionada."}, status=404)
+
+        return Response(resultado, status=200)
 
     except Exception as e:
         return Response({"error": str(e)}, status=500)
@@ -706,17 +786,13 @@ def historial_citas_paciente(request):
         # Obtener el paciente autenticado
         paciente = request.user.paciente
 
-        # Filtrar todas las citas del paciente (reservadas y finalizadas)
         citas = Cita.objects.filter(paciente=paciente).order_by('-fecha', '-hora')
 
-        # Construir la respuesta
         data = []
         for cita in citas:
-            # Inicializar datos de diagnóstico y receta como None
             diagnostico_detalle = None
             recetas_detalle = []
 
-            # Si la cita está finalizada, obtener datos de diagnóstico y receta
             if cita.estado == 'finalizada':
                 ficha_medica = getattr(cita, 'ficha_medica', None)
                 if ficha_medica and ficha_medica.diagnostico:
@@ -779,3 +855,42 @@ def calificar_cita(request, cita_id):
 
     except Exception as e:
         return Response({'error': str(e)}, status=500)
+
+@api_view(['GET'])
+def estadisticas_eficiencia(request):
+    try:
+        # Calcular eficiencia por especialidad
+        especialidades = (
+            Cita.objects.filter(calificacion__isnull=False)
+            .values('especialidad__nombre')
+            .annotate(eficiencia=Avg('calificacion'))
+            .order_by('-eficiencia')
+        )
+        especialidades_data = [
+            {"nombre": item['especialidad__nombre'], "eficiencia": round(item['eficiencia'], 2)}
+            for item in especialidades
+        ]
+
+        # Calcular eficiencia por médico
+        medicos = (
+            Cita.objects.filter(calificacion__isnull=False)
+            .values('medico__user__first_name', 'medico__user__last_name')
+            .annotate(eficiencia=Avg('calificacion'))
+            .order_by('-eficiencia')
+        )
+        medicos_data = [
+            {
+                "nombre": f"{item['medico__user__first_name']} {item['medico__user__last_name']}",
+                "eficiencia": round(item['eficiencia'], 2),
+            }
+            for item in medicos
+        ]
+
+        # Devolver los datos en un solo JSON
+        return Response({
+            "especialidades": especialidades_data,
+            "medicos": medicos_data,
+        }, status=200)
+
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)
