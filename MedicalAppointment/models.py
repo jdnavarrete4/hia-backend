@@ -18,14 +18,38 @@ class Canton(models.Model):
         return f"{self.nombre} ({self.provincia.nombre})"
     
 class Paciente(models.Model):
+    TIPO_IDENTIFICACION_CHOICES = [
+        ('cedula', 'Cédula'),
+        ('pasaporte', 'Pasaporte'),
+    ]
+
     user = models.OneToOneField(User, on_delete=models.CASCADE)
     telefono = models.CharField(max_length=15)
-    numero_cedula = models.CharField(max_length=10)
+    tipo_identificacion = models.CharField(
+        max_length=20,
+        choices=TIPO_IDENTIFICACION_CHOICES,
+        default='cedula'
+    )  # Nuevo campo para el tipo de identificación
+    numero_identificacion = models.CharField(max_length=20)  # Nuevo campo para el número de identificación
     fecha_nacimiento = models.DateField()
     direccion = models.TextField(blank=True, null=True)
     provincia = models.ForeignKey(Provincia, on_delete=models.CASCADE)
-    canton = models.ForeignKey(Canton, on_delete=models.CASCADE)
-    genero = models.CharField(max_length=20, choices=[('Masculino', 'Masculino'), ('Femenino', 'Femenino'), ('Otro', 'Otro')])
+    canton = models.ForeignKey(Canton, on_delete=models.CASCADE, blank=True, null=True)  
+    genero = models.CharField(
+        max_length=20,
+        choices=[
+            ('Masculino', 'Masculino'),
+            ('Femenino', 'Femenino'),
+            ('Otro', 'Otro')
+        ]
+    )
+    pais = models.CharField(  
+        max_length=50,
+        default='Ecuador',
+        blank=True,
+        null=True
+    )
+
 
     
 class Especialidad(models.Model):

@@ -51,20 +51,36 @@ def registrar_paciente(request):
             grupo_paciente = Group.objects.get(name='paciente')
             user.groups.add(grupo_paciente)
 
-            # Validar que provincia y cantón existan
+          # Validar la provincia seleccionada
             provincia = Provincia.objects.get(id=data['provincia'])
-            canton = Canton.objects.get(id=data['canton'])
+
+            # Si la provincia es "Otro" (ID 25), usar el país proporcionado y no vincular a cantón
+            if provincia.id == 26:
+                pais = data.get('pais')  # El país ingresado por el usuario
+                if not pais:
+                    return Response({'error': 'Debe proporcionar un país cuando la provincia sea "Otro".'}, status=status.HTTP_400_BAD_REQUEST)
+                canton = None  # No se asigna ningún cantón
+            else:
+                # Validar que el cantón exista y pertenezca a la provincia seleccionada
+                canton = Canton.objects.get(id=data['canton'])
+                pais = "Ecuador"  # No se usa el campo país si no es "Otro"
+
+             # Validar tipo de identificación
+            if data['tipo_identificacion'] not in ['cedula', 'pasaporte']:
+                return Response({'error': 'Tipo de identificación no válido. Debe ser "cedula" o "pasaporte".'}, status=status.HTTP_400_BAD_REQUEST)
 
             # Crear el paciente asociado al usuario
             paciente = Paciente.objects.create(
                 user=user,
                 telefono=data['telefono'],
-                numero_cedula=data['numero_cedula'],
+                tipo_identificacion=data['tipo_identificacion'],  # Nuevo campo
+                numero_identificacion=data['numero_identificacion'],  # Nuevo campo
                 fecha_nacimiento=data['fecha_nacimiento'],
                 direccion=data.get('direccion', ""),  # Dirección opcional
                 provincia=provincia,
                 canton=canton,
-                genero=data['genero']
+                genero=data['genero'],
+                pais=pais
             )
 
             # Serializar el paciente para la respuesta
@@ -149,9 +165,10 @@ def get_patient_data(request):
             'id': paciente.id,
             'nombre': request.user.first_name,
             'apellido': request.user.last_name,
-            'numero_cedula': paciente.numero_cedula,
+            'numero_identificacion': paciente.numero_identificacion,
             'correo_electronico': request.user.email,
             'telefono': paciente.telefono,
+            'tipo_identificacion': paciente.tipo_identificacion,
             'edad': edad,
             'rol': rol.capitalize(),
             'genero': paciente.genero
