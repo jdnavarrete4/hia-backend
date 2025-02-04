@@ -30,6 +30,68 @@ from rest_framework.generics import ListAPIView
 from django.db.models.functions import Concat
 from django.db.models import Value
 
+def calcular_triaje(fc, fr, pa, spo2, nc):
+    puntaje_total = 0
+
+    # Frecuencia cardiaca
+    if fc and '-' in fc:
+        rango = [int(x) for x in fc.split('-')]
+        if rango[0] < 40 or rango[1] > 140:
+            puntaje_total += 5 # critica
+        elif 121 <= rango[1] <= 140 or 40 <= rango[0] <= 59:
+            puntaje_total += 3# severa
+        elif 100 <= rango[1] <= 120 or 50 <= rango[0] <= 59:
+            puntaje_total += 1# moderada
+
+    # Frecuencia respiratoria
+    if fr:
+        fr = int(fr)
+        if fr > 30 or fr < 6:
+            puntaje_total += 5
+        elif 25 <= fr <= 30 or 6 <= fr <= 8:
+            puntaje_total += 3
+        elif 21 <= fr <= 24 or 9 <= fr <= 11:
+            puntaje_total += 1
+
+    # Presión arterial 
+    if pa:
+        pa = int(pa)
+        if pa > 180 or pa < 70:
+            puntaje_total += 5
+        elif 161 <= pa <= 180 or 70 <= pa <= 79:
+            puntaje_total += 3
+        elif 140 <= pa <= 160 or 80 <= pa <= 89:
+            puntaje_total += 1
+
+    # Saturación de oxígeno
+    if spo2:
+        spo2 = float(spo2)
+        if spo2 < 85:
+            puntaje_total += 5
+        elif 85 <= spo2 < 90:
+            puntaje_total += 3
+        elif 90 <= spo2 < 95:
+            puntaje_total += 1
+
+    # Nivel de conciencia
+    if nc == 'no_responde':
+        puntaje_total += 5
+    elif nc == 'dolor':
+        puntaje_total += 3
+    elif nc == 'voz':
+        puntaje_total += 1
+
+    # Categoría final
+    if puntaje_total <= 4:
+        categoria = 'Normal'
+    elif 5 <= puntaje_total <= 9:
+        categoria = 'Alerta moderada'
+    elif 10 <= puntaje_total <= 14:
+        categoria = 'Alerta severa'
+    else:
+        categoria = 'Crítico'
+
+    return puntaje_total, categoria
 
 
 @api_view(['POST'])
@@ -470,36 +532,63 @@ def crear_diagnostico(request, cita_id):
         # Obtén la cita asociada al diagnóstico
         cita = get_object_or_404(Cita, id=cita_id)
 
-        # Obtén los datos enviados en la solicitud
-        descripcion = request.data.get('descripcion')
-        es_covid = request.data.get('es_covid', False)
-        enfermedad_id = request.data.get('enfermedad')  # ID de la enfermedad
+        # Datos enviados por el médico
+        datos = request.data
+        descripcion = datos.get('descripcion', '')
+        es_covid = datos.get('es_covid', False)
+        enfermedad_id = datos.get('enfermedad')
+        frecuencia_cardiaca = datos.get('frecuencia_cardiaca')
+        frecuencia_respiratoria = datos.get('frecuencia_respiratoria')
+        presion_arterial = datos.get('presion_arterial')
+        saturacion_oxigeno = datos.get('saturacion_oxigeno')
+        nivel_conciencia = datos.get('nivel_conciencia')
 
         # Validar que la enfermedad exista
         enfermedad = get_object_or_404(Enfermedad, id=enfermedad_id)
 
-        # Asegúrate de usar el `User` asociado al médico
-        medico_user = cita.medico.user
+        # Calcular puntaje total y categoría
+        puntaje_total, categoria_triaje = calcular_triaje(
+            frecuencia_cardiaca,
+            frecuencia_respiratoria,
+            presion_arterial,
+            saturacion_oxigeno,
+            nivel_conciencia
+        )
 
         # Crear el diagnóstico
         diagnostico = Diagnostico.objects.create(
             descripcion=descripcion,
             es_covid=es_covid,
-            medico=medico_user,
+            medico=cita.medico.user,
             paciente=cita.paciente,
-            enfermedad=enfermedad  # Asociar la enfermedad
+            enfermedad=enfermedad,
+            frecuencia_cardiaca=frecuencia_cardiaca,
+            frecuencia_respiratoria=frecuencia_respiratoria,
+            presion_arterial=presion_arterial,
+            saturacion_oxigeno=saturacion_oxigeno,
+            nivel_conciencia=nivel_conciencia,
+            puntaje_total=puntaje_total,
+            categoria_triaje=categoria_triaje
         )
 
+        # Responder con el resultado
         return Response({
             "id": diagnostico.id,
             "descripcion": diagnostico.descripcion,
-            "es_covid": diagnostico.es_covid,
-            "enfermedad": diagnostico.enfermedad.nombre,  # Incluye el nombre de la enfermedad en la respuesta
-            "created_at": diagnostico.created_at,
+            "puntaje_total": diagnostico.puntaje_total,
+            "categoria_triaje": diagnostico.categoria_triaje,
+            "detalles": {
+                "frecuencia_cardiaca": diagnostico.frecuencia_cardiaca,
+                "frecuencia_respiratoria": diagnostico.frecuencia_respiratoria,
+                "presion_arterial": diagnostico.presion_arterial,
+                "saturacion_oxigeno": diagnostico.saturacion_oxigeno,
+                "nivel_conciencia": diagnostico.nivel_conciencia,
+            }
         }, status=201)
 
     except Exception as e:
         return Response({'error': str(e)}, status=400)
+
 
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -972,7 +1061,8 @@ def historial_paciente(request):
                     diagnostico_detalle = {
                         "descripcion": diagnostico.descripcion,
                         "es_covid": diagnostico.es_covid,
-                        "enfermedad": diagnostico.enfermedad.nombre if diagnostico.enfermedad else None
+                        "enfermedad": diagnostico.enfermedad.nombre if diagnostico.enfermedad else None,
+                        "triaje": diagnostico.categoria_triaje
                     }
 
                     # Obtener todas las recetas asociadas al diagnóstico
@@ -999,7 +1089,8 @@ def historial_paciente(request):
                 'direccion': cita.direccion,
                 'calificacion': cita.calificacion,
                 'diagnostico': diagnostico_detalle,  # Solo para finalizadas
-                'recetas': recetas_detalle,         # Lista de medicamentos
+                'recetas': recetas_detalle,    
+                # Lista de medicamentos
             })
 
         return Response(data, status=200)

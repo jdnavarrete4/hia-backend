@@ -173,8 +173,37 @@ class Diagnostico(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     medico = models.ForeignKey(User, on_delete=models.CASCADE)  # Relación con User
     paciente = models.ForeignKey('Paciente', on_delete=models.CASCADE)
-    enfermedad = models.ForeignKey('Enfermedad', on_delete=models.CASCADE, null=True, blank=True)  # Relación con Enfermedad
+    enfermedad = models.ForeignKey('Enfermedad', on_delete=models.CASCADE, null=True, blank=True)
 
+    # Campos para signos vitales
+    frecuencia_cardiaca = models.CharField(max_length=20, blank=True, null=True)  # Rango, ej: "100-120"
+    frecuencia_respiratoria = models.IntegerField(blank=True, null=True)
+    presion_arterial = models.IntegerField(blank=True, null=True)
+    saturacion_oxigeno = models.FloatField(blank=True, null=True)
+    nivel_conciencia = models.CharField(
+        max_length=50,
+        choices=[
+            ('alerta', 'Alerta'),
+            ('voz', 'Responde a voz'),
+            ('dolor', 'Responde al dolor'),
+            ('no_responde', 'No responde'),
+        ],
+        blank=True,
+        null=True
+    )
+
+    # Resultados del triaje
+    puntaje_total = models.IntegerField(default=0)
+    categoria_triaje = models.CharField(
+        max_length=50,
+        choices=[
+            ('verde', 'No urgente'),
+            ('amarillo', 'Urgente'),
+            ('naranja', 'Muy urgente'),
+            ('rojo', 'Emergencia'),
+        ],
+        default='verde'
+    )
 
     def __str__(self):
         return f"Diagnóstico de {self.paciente} por {self.medico}"
