@@ -26,7 +26,9 @@ import calendar
 from django.db.models import Count, Q, F
 from django.db.models import Avg
 from django.db.models.functions import TruncDay, TruncWeek, TruncMonth
-
+from rest_framework.generics import ListAPIView
+from django.db.models.functions import Concat
+from django.db.models import Value
 
 
 
@@ -911,3 +913,96 @@ def estadisticas_eficiencia(request):
 
     except Exception as e:
         return Response({"error": str(e)}, status=500)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def historial_paciente(request):
+    """
+    Permite a un médico buscar y ver las citas de cualquier paciente
+    ingresando el número de cédula, nombre o apellido.
+    """
+    try:
+        # Validar que el usuario autenticado tiene el rol de médico
+        if not request.user.groups.filter(name='medico').exists():
+            return Response({"error": "Solo los médicos pueden acceder a esta información."}, status=403)
+
+        # Obtener el parámetro de búsqueda (cédula, nombre o apellido)
+        query = request.query_params.get('q', '').strip()
+        if not query:
+            return Response({"error": "Debe proporcionar un parámetro de búsqueda ''."}, status=400)
+
+        # Buscar pacientes que coincidan con el criterio
+        pacientes = Paciente.objects.filter(
+            Q(numero_identificacion__icontains=query) |
+            Q(user__first_name__icontains=query) |
+            Q(user__last_name__icontains=query) | 
+            Q(user__first_name__icontains=query) &  Q(user__last_name__icontains=query)
+        )
+        pacientes = Paciente.objects.annotate(
+    full_name=Concat('user__first_name', Value(' '), 'user__last_name')
+    ).filter(
+    Q(numero_identificacion__icontains=query) |  # Buscar por número de identificación
+    Q(user__first_name__icontains=query) |      # Buscar por nombre
+    Q(user__last_name__icontains=query) |       # Buscar por apellido
+    Q(full_name__icontains=query)               # Buscar por combinación de nombre y apellido
+        )
+
+        # Verificar si se encontraron pacientes
+        if not pacientes.exists():
+            return Response({"error": "No se encontraron pacientes con los datos proporcionados."}, status=404)
+
+        # Obtener todas las citas de los pacientes encontrados
+        citas = Cita.objects.filter(paciente__in=pacientes).order_by('-fecha', '-hora')
+
+        # Si no hay citas asociadas
+        if not citas.exists():
+            return Response({"error": "No se encontraron citas para los pacientes proporcionados."}, status=404)
+
+        # Formatear la respuesta con los detalles de las citas
+        data = []
+        for cita in citas:
+            diagnostico_detalle = None
+            recetas_detalle = []
+
+            if cita.estado == 'finalizada':
+                ficha_medica = getattr(cita, 'ficha_medica', None)
+                if ficha_medica and ficha_medica.diagnostico:
+                    diagnostico = ficha_medica.diagnostico
+                    diagnostico_detalle = {
+                        "descripcion": diagnostico.descripcion,
+                        "es_covid": diagnostico.es_covid,
+                        "enfermedad": diagnostico.enfermedad.nombre if diagnostico.enfermedad else None
+                    }
+
+                    # Obtener todas las recetas asociadas al diagnóstico
+                    recetas = diagnostico.recetas.all()
+                    recetas_detalle = [
+                        {
+                            "nombre_medicamento": receta.nombre_medicamento,
+                            "dosis": receta.dosis,
+                            "duracion": receta.duracion,
+                            "prescripcion": receta.prescripcion,
+                        }
+                        for receta in recetas
+                    ]
+
+            # Agregar los datos de la cita a la respuesta
+            data.append({
+                'id': cita.id,
+                'fecha': cita.fecha.strftime('%d-%m-%Y'),
+                'hora': cita.hora.strftime('%H:%M'),
+                'estado': cita.estado,
+                'especialidad': cita.especialidad.nombre,
+                'medico': f"{cita.medico.user.first_name} {cita.medico.user.last_name}",
+                'paciente': f"{cita.paciente.user.first_name} {cita.paciente.user.last_name}",  # Nombres del paciente
+                'direccion': cita.direccion,
+                'calificacion': cita.calificacion,
+                'diagnostico': diagnostico_detalle,  # Solo para finalizadas
+                'recetas': recetas_detalle,         # Lista de medicamentos
+            })
+
+        return Response(data, status=200)
+
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)

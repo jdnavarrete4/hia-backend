@@ -21,6 +21,7 @@ from .views import (
     fechas_disponibles_por_especialidad,
     get_doctor_data,
     historial_citas_paciente,
+    historial_paciente,
     horarios_disponibles,
     listar_enfermedades,
     listar_medicos_por_especialidad,
@@ -67,6 +68,7 @@ urlpatterns = [
     path('api/historial-paciente/', historial_citas_paciente,name='historial_citas_paciente'),
     path('api/citas/<int:cita_id>/calificar/', calificar_cita, name='calificar_cita'),
     path('api/estadisticas-eficiencia/', estadisticas_eficiencia,name='estadisticas_eficiencia'),
+    path('api/historial-doctor-paciente/', historial_paciente, name='historial_paciente'),
 
 ]
 
